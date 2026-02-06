@@ -1,111 +1,119 @@
 import streamlit as st
 import pandas as pd
-from PIL import Image, ImageDraw
-from fpdf import FPDF
+from PIL import Image, ImageDraw, ImageFont
 import tempfile
 
-# --- 1. CONFIGURACIÓN ---
-st.set_page_config(page_title="Carpintería Pro - Diseñador", layout="wide")
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="Carpintería Pro - Planos Detallados", layout="wide")
 
-if "modulos" not in st.session_state:
-    st.session_state.modulos = []
+if "proyecto" not in st.session_state:
+    st.session_state.proyecto = []
 
-st.title("🪚 Diseñador de Gabinetes Profesional")
+st.title("📐 Generador de Planos Técnicos de Muebles")
 
-# --- 2. ENTRADA DE DATOS (BARRA LATERAL) ---
+# --- BARRA LATERAL: CONFIGURACIÓN DE MÓDULOS ---
 with st.sidebar:
-    st.header("Configurar Mueble")
-    nombre = st.text_input("Nombre del Módulo", "Cocina")
-    ancho = st.number_input("Ancho (pulg)", 1.0, 150.0, 30.0)
-    alto = st.number_input("Alto (pulg)", 1.0, 150.0, 36.0)
+    st.header("Agregar Componente")
     
+    # Selección de tipo de espacio específico
+    tipo = st.selectbox("Tipo de Espacio", [
+        "Gabinete de Basura (Trash)", 
+        "Módulo de Cajones", 
+        "Base de Fregadero (Sink)", 
+        "Espacio Lavavajillas (DW)",
+        "Gabinete de Puerta Estándar"
+    ])
+    
+    ancho = st.number_input("Ancho del módulo (pulg)", 5.0, 100.0, 24.0)
+    alto = st.number_input("Alto del módulo (pulg)", 10.0, 100.0, 36.0)
+    
+    if tipo == "Módulo de Cajones":
+        detalles = st.slider("Número de cajones", 1, 5, 3)
+    else:
+        detalles = 0 # Para puertas o espacios abiertos
+
+    if st.button("➕ Añadir al Plano"):
+        st.session_state.proyecto.append({
+            "tipo": tipo,
+            "ancho": ancho,
+            "alto": alto,
+            "detalles": detalles
+        })
+
     st.divider()
-    st.subheader("Diseño Interno")
-    # Esta es la clave para las divisiones
-    num_div = st.number_input("Número de divisiones/cajones", 1, 12, 3)
-    tipo_diseno = st.radio("Tipo de diseño", ["Cajones", "Espacios Abiertos"])
-    
-    st.divider()
-    st.subheader("Costos")
-    costo_hoja = st.number_input("Costo Hoja Triplay", value=800.0)
-    mano_obra = st.number_input("Mano de obra x pulgada", value=15.0)
-    
-    btn_add = st.button("➕ Agregar al Proyecto")
-    
-    if st.button("🗑️ Limpiar Todo"):
-        st.session_state.modulos = []
+    if st.button("🗑️ Borrar Todo"):
+        st.session_state.proyecto = []
         st.rerun()
 
-# --- 3. LÓGICA DE CÁLCULO ---
-if btn_add:
-    area_frontal = ancho * alto
-    costo_mat = (area_frontal / (48*96)) * costo_hoja
-    # Un pequeño extra por cada división interna
-    total = costo_mat + (num_div * 50) + (ancho * mano_obra)
+# --- DIBUJO DEL PLANO TÉCNICO ---
+def dibujar_plano(modulos):
+    # Calcular dimensiones totales
+    ancho_total_pulg = sum(m['ancho'] for m in modulos)
+    alto_max_pulg = max(m['alto'] for m in modulos) if modulos else 40
     
-    st.session_state.modulos.append({
-        "Nombre": nombre,
-        "Ancho": ancho,
-        "Alto": alto,
-        "Divisiones": num_div,
-        "Tipo": tipo_diseno,
-        "Costo": round(total, 2)
-    })
-    st.success(f"✅ {nombre} agregado!")
-
-# --- 4. VISUALIZACIÓN DETALLADA ---
-if st.session_state.modulos:
-    col_t, col_v = st.columns([1, 1.5])
+    # Escala: 1 pulgada = 10 píxeles para mayor nitidez
+    margen = 80
+    canvas_w = int(ancho_total_pulg * 10) + (margen * 2)
+    canvas_h = int(alto_max_pulg * 10) + (margen * 3)
     
-    with col_t:
-        st.subheader("📋 Resumen")
-        df = pd.DataFrame(st.session_state.modulos)
-        st.dataframe(df[["Nombre", "Divisiones", "Tipo", "Costo"]], use_container_width=True)
-        st.metric("Inversión Total", f"${df['Costo'].sum():,.2f}")
-
-    with col_v:
-        st.subheader("📐 Vista Previa del Diseño")
-        # Lienzo para el dibujo
-        img = Image.new('RGB', (800, 400), (255, 255, 255))
-        draw = ImageDraw.Draw(img)
+    img = Image.new('RGB', (canvas_w, canvas_h), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    
+    x_cursor = margen
+    y_suelo = canvas_h - margen
+    
+    for m in modulos:
+        w = int(m['ancho'] * 10)
+        h = int(m['alto'] * 10)
+        y_techo = y_suelo - h
         
-        x_off = 50
-        for m in st.session_state.modulos:
-            # Escala para el dibujo
-            w_px = int(m["Ancho"] * 4)
-            h_px = int(m["Alto"] * 4)
-            y_base = 350
-            y_techo = y_base - h_px
+        # 1. Dibujar estructura externa (líneas negras finas como plano)
+        draw.rectangle([x_cursor, y_techo, x_cursor + w, y_suelo], outline="black", width=2)
+        
+        # 2. Detalles según tipo
+        if m['tipo'] == "Módulo de Cajones":
+            h_cajon = h / m['detalles']
+            for i in range(m['detalles']):
+                y_c = y_techo + (i * h_cajon)
+                draw.rectangle([x_cursor + 5, y_c + 5, x_cursor + w - 5, y_c + h_cajon - 5], outline="black", width=1)
+                # Jaladera
+                draw.line([x_cursor + w/2 - 15, y_c + h_cajon/2, x_cursor + w/2 + 15, y_c + h_cajon/2], fill="black", width=2)
+        
+        elif m['tipo'] == "Base de Fregadero (Sink)":
+            # Dibujar dos puertas
+            draw.line([x_cursor + w/2, y_techo + 10, x_cursor + w/2, y_suelo - 10], fill="black", width=1)
+            # Jaladeras circulares
+            draw.ellipse([x_cursor + w/2 - 15, y_techo + 40, x_cursor + w/2 - 5, y_techo + 50], outline="black")
+            draw.ellipse([x_cursor + w/2 + 5, y_techo + 40, x_cursor + w/2 + 15, y_techo + 50], outline="black")
             
-            # 1. Dibujar contorno del mueble
-            draw.rectangle([x_off, y_techo, x_off + w_px, y_base], 
-                           outline="#5D4037", width=4, fill="#D2B48C")
-            
-            # 2. Dibujar las divisiones internas
-            if m["Divisiones"] > 1:
-                alto_seccion = h_px / m["Divisiones"]
-                for i in range(1, m["Divisiones"]):
-                    y_linea = y_techo + (i * alto_seccion)
-                    # Línea divisoria
-                    draw.line([(x_off, y_linea), (x_off + w_px, y_linea)], 
-                              fill="#5D4037", width=2)
-                    
-                    # Si son cajones, dibujamos una jaladera en cada sección
-                    if m["Tipo"] == "Cajones":
-                        cent_x = x_off + (w_px / 2)
-                        cent_y = y_linea - (alto_seccion / 2)
-                        draw.ellipse([cent_x-10, cent_y-2, cent_x+10, cent_y+2], fill="black")
-                
-                # Jaladera del último compartimento
-                if m["Tipo"] == "Cajones":
-                    cent_x = x_off + (w_px / 2)
-                    cent_y = y_base - (alto_seccion / 2)
-                    draw.ellipse([cent_x-10, cent_y-2, cent_x+10, cent_y+2], fill="black")
+        elif m['tipo'] == "Gabinete de Basura (Trash)":
+            draw.rectangle([x_cursor + 10, y_techo + 10, x_cursor + w - 10, y_suelo - 10], outline="black", width=1)
+            draw.line([x_cursor + 20, y_techo + 30, x_cursor + w - 20, y_techo + 30], fill="black", width=3)
 
-            draw.text((x_off, y_base + 10), m["Nombre"], fill="black")
-            x_off += w_px + 40
-            
-        st.image(img, use_container_width=True)
+        # 3. Cotas (Medidas en el dibujo)
+        draw.text((x_cursor + w/2 - 10, y_suelo + 5), f"{m['ancho']}\"", fill="red")
+        
+        x_cursor += w
+
+    # Cota total
+    if modulos:
+        draw.line([margen, y_suelo + 40, x_cursor, y_suelo + 40], fill="red", width=2)
+        draw.text((canvas_w/2 - 20, y_suelo + 45), f"Total: {ancho_total_pulg}\" inches", fill="red")
+
+    return img
+
+# --- VISUALIZACIÓN ---
+if st.session_state.proyecto:
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        st.subheader("Lista de Componentes")
+        df = pd.DataFrame(st.session_state.proyecto)
+        st.table(df[["tipo", "ancho", "alto"]])
+        
+    with col2:
+        st.subheader("Plano de Alzado (Frontal)")
+        imagen_plano = dibujar_plano(st.session_state.proyecto)
+        st.image(imagen_plano, use_container_width=True, caption="Medidas en pulgadas")
 else:
-    st.info("Configura un módulo y presiona 'Agregar' para ver el diseño.")
-            
+    st.info("Agrega módulos para empezar a armar tu plano técnico.")
