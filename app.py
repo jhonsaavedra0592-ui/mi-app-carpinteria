@@ -1,80 +1,83 @@
 import streamlit as st
 import pandas as pd
 from PIL import Image, ImageDraw
+from fpdf import FPDF
+import tempfile
+import os
 
-# --- CONFIGURACIÓN ---
-st.set_page_config(page_title="Carpintería Pro: IA Design", layout="wide")
-
-if "proyecto" not in st.session_state:
-    st.session_state.proyecto = []
-
-# --- MOTOR DE INTELIGENCIA DE DISEÑO (LÓGICA DE IA) ---
-def generar_sugerencia_ia(ancho_total, alto):
-    """Analiza las medidas y propone una configuración lógica"""
-    sugerencias = []
+# --- LÓGICA DE DIBUJO (Mantenemos la anterior para consistencia) ---
+def dibujar_plano_detallado(mueble):
+    ESC = 10 
+    img_w = int(mueble['ancho'] * ESC) + 200
+    img_h = 600
+    img = Image.new('RGB', (img_w, img_h), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
     
-    if ancho_total >= 90:
-        sugerencias.append({
-            "estilo": "Cocina Profesional",
-            "descripcion": "En este espacio de +90\", lo ideal es un combo de: 1 Basurero (18\"), 1 Cajonera Grande (30\"), 1 Fregadero (36\") y Lavavajillas.",
-            "secciones": [
-                {"ancho": 18, "tipo": "Basura", "div": 1},
-                {"ancho": 30, "tipo": "Cajonera", "div": 3},
-                {"ancho": 34, "tipo": "Fregadero", "div": 2},
-                {"ancho": 24, "tipo": "DW", "div": 1}
-            ]
-        })
+    x_start, y_piso = 100, 500
+    h_px = int(mueble['alto'] * ESC)
+    y_top = y_piso - h_px
     
-    if 40 <= ancho_total < 90:
-        sugerencias.append({
-            "estilo": "Vanity de Baño Moderno",
-            "descripcion": "Para un espacio mediano, una sección de puertas central con cajones laterales maximiza el almacenaje.",
-            "secciones": [
-                {"ancho": ancho_total * 0.3, "tipo": "Cajones", "div": 3},
-                {"ancho": ancho_total * 0.4, "tipo": "Puertas", "div": 2},
-                {"ancho": ancho_total * 0.3, "tipo": "Cajones", "div": 3}
-            ]
-        })
+    draw.rectangle([x_start, y_top, x_start + mueble['ancho']*ESC, y_piso], outline="black", width=3)
+    
+    x_actual = x_start
+    for sec in mueble['secciones']:
+        w_sec_px = int(sec['ancho'] * ESC)
+        draw.rectangle([x_actual, y_top, x_actual + w_sec_px, y_piso], outline="black", width=2)
+        
+        # Cotas rojas de cada sección
+        draw.line([x_actual + 2, y_piso + 20, x_actual + w_sec_px - 2, y_piso + 20], fill="red", width=1)
+        draw.text((x_actual + w_sec_px/2 - 5, y_piso + 25), f"{sec['ancho']}", fill="red")
+        draw.text((x_actual + 5, y_top + 5), sec['tipo'], fill="black")
+        x_actual += w_sec_px
+        
+    return img
 
-    if alto > 80:
-        sugerencias.append({
-            "estilo": "Torre de Despensa / Clóset",
-            "descripcion": "Debido a la gran altura, te sugiero dividir en 3 secciones: Maletero superior, Espacio de colgado y Cajones inferiores.",
-            "secciones": [
-                {"ancho": ancho_total, "tipo": "Maletero", "div": 1},
-                {"ancho": ancho_total, "tipo": "Cajonera", "div": 4}
-            ]
-        })
+# --- FUNCIÓN PARA CREAR EL PDF ---
+def crear_pdf(mueble, imagen_plano):
+    pdf = FPDF()
+    pdf.add_page()
     
-    return sugerencias
+    # Encabezado Profesional
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(200, 10, txt=f"Cotización y Plano: {mueble['nombre']}", ln=True, align='C')
+    
+    pdf.set_font("Arial", size=12)
+    pdf.ln(10)
+    pdf.cell(200, 10, txt=f"Medidas Generales: {mueble['ancho']}\" Ancho x {mueble['alto']}\" Alto", ln=True)
+    
+    # Guardar imagen temporalmente para el PDF
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
+        imagen_plano.save(tmpfile.name)
+        # Insertar imagen en el PDF (ajustando al ancho de la página)
+        pdf.image(tmpfile.name, x=10, y=40, w=190)
+        tmp_path = tmpfile.name
+
+    # Tabla de especificaciones
+    pdf.ln(80) # Espacio después de la imagen
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(200, 10, txt="Detalle de Secciones Internas:", ln=True)
+    pdf.set_font("Arial", size=10)
+    
+    for i, sec in enumerate(mueble['secciones']):
+        pdf.cell(200, 8, txt=f"- Sección {i+1}: {sec['tipo']} de {sec['ancho']} pulgadas.", ln=True)
+
+    pdf_output = pdf.output(dest='S').encode('latin-1')
+    os.unlink(tmp_path) # Borrar archivo temporal
+    return pdf_output
 
 # --- INTERFAZ DE USUARIO ---
-st.title("🤖 Carpintería Pro + IA de Diseño")
-
-with st.sidebar:
-    st.header("📏 Medidas del Espacio")
-    ancho_vacio = st.number_input("Ancho disponible (in)", 10.0, 300.0, 96.0)
-    alto_vacio = st.number_input("Alto disponible (in)", 10.0, 120.0, 36.0)
-    
-    if st.button("🧠 Generar Ideas con IA"):
-        st.session_state.ideas_ia = generar_sugerencia_ia(ancho_vacio, alto_vacio)
-
-# --- MOSTRAR SUGERENCIAS DE IA ---
-if "ideas_ia" in st.session_state:
-    st.subheader("💡 Sugerencias de Diseño para tu Medida")
-    cols = st.columns(len(st.session_state.ideas_ia))
-    
-    for idx, idea in enumerate(st.session_state.ideas_ia):
-        with cols[idx]:
-            st.info(f"**{idea['estilo']}**")
-            st.write(idea['descripcion'])
-            if st.button(f"Aplicar Diseño {idx+1}"):
-                st.session_state.proyecto.append({
-                    "nombre": idea['estilo'],
-                    "ancho": ancho_vacio,
-                    "alto": alto_vacio,
-                    "secciones": idea['secciones']
-                })
-                st.rerun()
-
-# --- (Aquí iría tu función de dibujo 'dibujar_plano_detallado' que ya creamos) ---
+if st.session_state.proyecto:
+    for i, m in enumerate(st.session_state.proyecto):
+        st.subheader(f"📋 Vista Previa: {m['nombre']}")
+        img_final = dibujar_plano_detallado(m)
+        st.image(img_final, use_container_width=True)
+        
+        # Botón de Descarga PDF
+        pdf_data = crear_pdf(m, img_final)
+        st.download_button(
+            label="📥 Descargar Plano en PDF",
+            data=pdf_data,
+            file_name=f"Plano_{m['nombre']}.pdf",
+            mime="application/pdf"
+        )
+        
