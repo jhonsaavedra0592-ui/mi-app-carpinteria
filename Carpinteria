@@ -1,0 +1,96 @@
+import streamlit as st
+from PIL import Image, ImageDraw
+import pandas as pd
+from fpdf import FPDF
+import tempfile
+
+st.set_page_config(page_title="Carpintería Pro - Presupuestador", layout="wide")
+
+st.title("🛠️ Carpintería Pro: Diseño, Plano y PDF")
+
+# --- CONFIGURACIÓN EN BARRA LATERAL ---
+st.sidebar.header("Precios de Referencia")
+costo_hoja = st.sidebar.number_input("Costo Hoja Plywood", value=55.0)
+costo_herraje = st.sidebar.number_input("Herrajes por Módulo", value=20.0)
+mano_obra_pulg = st.sidebar.number_input("Mano de Obra (por pulgada)", value=12.0)
+
+# --- GESTIÓN DE DISEÑO ---
+if "modulos" not in st.session_state:
+    st.session_state.modulos = []
+
+col1, col2 = st.columns([1, 2])
+
+with col1:
+    st.header("Añadir Módulos")
+    nombre = st.text_input("Nombre (ej: Gabinete Bajo)")
+    ancho = st.number_input("Ancho (pulg)", value=15.0)
+    alto = st.number_input("Alto (pulg)", value=34.5)
+    
+    if st.button("➕ Agregar Módulo"):
+        st.session_state.modulos.append({"nombre": nombre, "ancho": ancho, "alto": alto})
+
+    if st.button("🗑️ Borrar Todo"):
+        st.session_state.modulos = []
+
+# --- RESULTADOS Y GENERACIÓN DE PDF ---
+with col2:
+    if st.session_state.modulos:
+        # Cálculos de dinero
+        total_ancho = sum(m['ancho'] for m in st.session_state.modulos)
+        area_estimada = sum((m['ancho'] * m['alto'] * 2.5) / 144 for m in st.session_state.modulos)
+        hojas = round((area_estimada / 32) * 1.15, 1)
+        costo_total_mat = (hojas * costo_hoja) + (len(st.session_state.modulos) * costo_herraje)
+        total_mano_obra = total_ancho * mano_obra_pulg
+        precio_final = costo_total_mat + total_mano_obra
+
+        # Crear Imagen del Plano
+        img = Image.new('RGB', (800, 300), "white")
+        draw = ImageDraw.Draw(img)
+        x_off, esc = 50, 5
+        for m in st.session_state.modulos:
+            w_px, h_px = m['ancho'] * esc, m['alto'] * esc
+            draw.rectangle([x_off, 250 - h_px, x_off + w_px, 250], outline="black", width=2)
+            draw.text((x_off + 2, 260), f"{m['nombre']}\n{m['ancho']}\"", fill="black")
+            x_off += w_px
+        
+        st.image(img, caption="Vista Previa del Diseño")
+
+        # FUNCIÓN PARA CREAR EL PDF
+        def generar_pdf(modulos, total, mat, obra, img_obj):
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", 'B', 16)
+            pdf.cell(200, 10, "COTIZACIÓN DE CARPINTERÍA", ln=True, align='C')
+            
+            pdf.set_font("Arial", '', 12)
+            pdf.ln(10)
+            pdf.cell(200, 10, f"Resumen de Medidas: Total Ancho {total_ancho}\" ", ln=True)
+            
+            # Guardar imagen temporal para el PDF
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
+                img_obj.save(tmpfile.name)
+                pdf.image(tmpfile.name, x=10, y=40, w=180)
+            
+            pdf.ln(70)
+            pdf.set_font("Arial", 'B', 12)
+            pdf.cell(200, 10, "DETALLE DE COSTOS:", ln=True)
+            pdf.set_font("Arial", '', 12)
+            pdf.cell(200, 10, f"- Materiales y Herrajes: ${mat:.2f}", ln=True)
+            pdf.cell(200, 10, f"- Mano de Obra: ${obra:.2f}", ln=True)
+            pdf.set_font("Arial", 'B', 14)
+            pdf.cell(200, 15, f"TOTAL A PAGAR: ${precio_final:.2f}", ln=True)
+            
+            return pdf.output(dest='S').encode('latin-1')
+
+        pdf_bytes = generar_pdf(st.session_state.modulos, total_ancho, costo_total_mat, total_mano_obra, img)
+        
+        st.download_button(
+            label="📄 Descargar Presupuesto (PDF)",
+            data=pdf_bytes,
+            file_name="cotizacion_mueble.pdf",
+            mime="application/pdf"
+        )
+        
+        st.success(f"Precio Sugerido: ${precio_final:.2f}")
+    else:
+        st.info("El diseño está vacío. Agrega módulos a la izquierda.")
