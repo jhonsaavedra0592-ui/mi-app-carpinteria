@@ -1,119 +1,135 @@
 import streamlit as st
 import pandas as pd
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 import tempfile
 
-# --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Carpintería Pro - Planos Detallados", layout="wide")
+# --- 1. CONFIGURACIÓN E INICIALIZACIÓN ---
+st.set_page_config(page_title="Carpintería Pro: Master Design", layout="wide")
 
 if "proyecto" not in st.session_state:
     st.session_state.proyecto = []
 
-st.title("📐 Generador de Planos Técnicos de Muebles")
+st.title("🚀 Sistema Integral de Diseño, Despiece y Nesting")
 
-# --- BARRA LATERAL: CONFIGURACIÓN DE MÓDULOS ---
+# --- PARÁMETROS DE MATERIAL ---
+ANCHO_HOJA = 96  # pulgadas
+ALTO_HOJA = 48   # pulgadas
+ESCALA_NESTING = 8 # Píxeles por pulgada para el gráfico de corte
+
+# --- 2. HERRAMIENTAS DE DISEÑO ---
 with st.sidebar:
-    st.header("Agregar Componente")
+    st.header("Configurador de Mueble")
+    muro = st.selectbox("Asignar a Pared/Muro", ["Pared A (Principal)", "Pared B (Lateral)", "Isla"])
+    tipo = st.selectbox("Tipo de Mueble", ["Gabinete Bajo", "Alacena Superior", "Torre Despensa", "Cajonera"])
     
-    # Selección de tipo de espacio específico
-    tipo = st.selectbox("Tipo de Espacio", [
-        "Gabinete de Basura (Trash)", 
-        "Módulo de Cajones", 
-        "Base de Fregadero (Sink)", 
-        "Espacio Lavavajillas (DW)",
-        "Gabinete de Puerta Estándar"
-    ])
+    ancho = st.number_input("Ancho (in)", 5.0, 120.0, 30.0)
+    alto = st.number_input("Alto (in)", 10.0, 120.0, 34.5)
+    prof = st.number_input("Profundidad (in)", 10.0, 30.0, 24.0)
     
-    ancho = st.number_input("Ancho del módulo (pulg)", 5.0, 100.0, 24.0)
-    alto = st.number_input("Alto del módulo (pulg)", 10.0, 100.0, 36.0)
-    
-    if tipo == "Módulo de Cajones":
-        detalles = st.slider("Número de cajones", 1, 5, 3)
-    else:
-        detalles = 0 # Para puertas o espacios abiertos
+    div = st.slider("Número de divisiones", 1, 6, 2)
+    espesor = st.selectbox("Espesor del material (in)", [0.5, 0.625, 0.75], index=2)
 
-    if st.button("➕ Añadir al Plano"):
+    if st.button("➕ Agregar al Proyecto"):
         st.session_state.proyecto.append({
-            "tipo": tipo,
-            "ancho": ancho,
-            "alto": alto,
-            "detalles": detalles
+            "muro": muro, "tipo": tipo, "ancho": ancho, 
+            "alto": alto, "prof": prof, "div": div, "espesor": espesor
         })
 
-    st.divider()
-    if st.button("🗑️ Borrar Todo"):
+    if st.button("🗑️ Reiniciar Todo"):
         st.session_state.proyecto = []
         st.rerun()
 
-# --- DIBUJO DEL PLANO TÉCNICO ---
-def dibujar_plano(modulos):
-    # Calcular dimensiones totales
-    ancho_total_pulg = sum(m['ancho'] for m in modulos)
-    alto_max_pulg = max(m['alto'] for m in modulos) if modulos else 40
-    
-    # Escala: 1 pulgada = 10 píxeles para mayor nitidez
-    margen = 80
-    canvas_w = int(ancho_total_pulg * 10) + (margen * 2)
-    canvas_h = int(alto_max_pulg * 10) + (margen * 3)
-    
-    img = Image.new('RGB', (canvas_w, canvas_h), (255, 255, 255))
-    draw = ImageDraw.Draw(img)
-    
-    x_cursor = margen
-    y_suelo = canvas_h - margen
-    
-    for m in modulos:
-        w = int(m['ancho'] * 10)
-        h = int(m['alto'] * 10)
-        y_techo = y_suelo - h
-        
-        # 1. Dibujar estructura externa (líneas negras finas como plano)
-        draw.rectangle([x_cursor, y_techo, x_cursor + w, y_suelo], outline="black", width=2)
-        
-        # 2. Detalles según tipo
-        if m['tipo'] == "Módulo de Cajones":
-            h_cajon = h / m['detalles']
-            for i in range(m['detalles']):
-                y_c = y_techo + (i * h_cajon)
-                draw.rectangle([x_cursor + 5, y_c + 5, x_cursor + w - 5, y_c + h_cajon - 5], outline="black", width=1)
-                # Jaladera
-                draw.line([x_cursor + w/2 - 15, y_c + h_cajon/2, x_cursor + w/2 + 15, y_c + h_cajon/2], fill="black", width=2)
-        
-        elif m['tipo'] == "Base de Fregadero (Sink)":
-            # Dibujar dos puertas
-            draw.line([x_cursor + w/2, y_techo + 10, x_cursor + w/2, y_suelo - 10], fill="black", width=1)
-            # Jaladeras circulares
-            draw.ellipse([x_cursor + w/2 - 15, y_techo + 40, x_cursor + w/2 - 5, y_techo + 50], outline="black")
-            draw.ellipse([x_cursor + w/2 + 5, y_techo + 40, x_cursor + w/2 + 15, y_techo + 50], outline="black")
-            
-        elif m['tipo'] == "Gabinete de Basura (Trash)":
-            draw.rectangle([x_cursor + 10, y_techo + 10, x_cursor + w - 10, y_suelo - 10], outline="black", width=1)
-            draw.line([x_cursor + 20, y_techo + 30, x_cursor + w - 20, y_techo + 30], fill="black", width=3)
+# --- 3. LÓGICA DE DESPIECE Y OPTIMIZACIÓN ---
+def calcular_despiece(m):
+    e = m['espesor']
+    piezas = [
+        {"Pieza": "Lateral", "Largo": m['alto'], "Ancho": m['prof'], "Cant": 2},
+        {"Pieza": "Piso/Techo", "Largo": m['ancho'] - (2*e), "Ancho": m['prof'], "Cant": 2},
+        {"Pieza": "Fondo", "Largo": m['alto'], "Ancho": m['ancho'], "Cant": 1},
+    ]
+    if m['div'] > 1:
+        piezas.append({"Pieza": "Repisa", "Largo": m['ancho'] - (2*e) - 0.1, "Ancho": m['prof'] - 1, "Cant": m['div']-1})
+    return piezas
 
-        # 3. Cotas (Medidas en el dibujo)
-        draw.text((x_cursor + w/2 - 10, y_suelo + 5), f"{m['ancho']}\"", fill="red")
+def optimizar_nesting(todas_piezas):
+    """Algoritmo simple de empaquetado por estantería (Shelf Packing)"""
+    piezas_individuales = []
+    for p in todas_piezas:
+        for _ in range(p['Cant']):
+            # Orientamos siempre el lado largo en el eje X para consistencia
+            ancho_p, alto_p = (p['Largo'], p['Ancho']) if p['Largo'] >= p['Ancho'] else (p['Ancho'], p['Largo'])
+            piezas_individuales.append({'w': ancho_p, 'h': alto_p, 'nombre': p['Pieza']})
+    
+    # Ordenar por altura descendente
+    piezas_individuales.sort(key=lambda x: x['h'], reverse=True)
+
+    hojas = []
+    def nueva_hoja(): return {"piezas": [], "x": 0, "y": 0, "h_max_fila": 0}
+    
+    hoja_actual = nueva_hoja()
+    for p in piezas_individuales:
+        # Si la pieza no cabe en la fila actual, saltar a la siguiente
+        if hoja_actual['x'] + p['w'] > ANCHO_HOJA:
+            hoja_actual['x'] = 0
+            hoja_actual['y'] += hoja_actual['h_max_fila']
+            hoja_actual['h_max_fila'] = 0
         
-        x_cursor += w
+        # Si no cabe en la hoja actual, crear nueva hoja
+        if hoja_actual['y'] + p['h'] > ALTO_HOJA:
+            hojas.append(hoja_actual)
+            hoja_actual = nueva_hoja()
+        
+        # Colocar pieza
+        hoja_actual['piezas'].append({'x': hoja_actual['x'], 'y': hoja_actual['y'], 'w': p['w'], 'h': p['h'], 'n': p['nombre']})
+        hoja_actual['x'] += p['w']
+        hoja_actual['h_max_fila'] = max(hoja_actual['h_max_fila'], p['h'])
+    
+    hojas.append(hoja_actual)
+    return hojas
 
-    # Cota total
-    if modulos:
-        draw.line([margen, y_suelo + 40, x_cursor, y_suelo + 40], fill="red", width=2)
-        draw.text((canvas_w/2 - 20, y_suelo + 45), f"Total: {ancho_total_pulg}\" inches", fill="red")
-
-    return img
-
-# --- VISUALIZACIÓN ---
+# --- 4. VISUALIZACIÓN ---
 if st.session_state.proyecto:
-    col1, col2 = st.columns([1, 2])
+    tab_planos, tab_despiece, tab_nesting = st.tabs(["🖼️ Planos", "📋 Despiece", "📐 Optimización (Nesting)"])
     
-    with col1:
-        st.subheader("Lista de Componentes")
-        df = pd.DataFrame(st.session_state.proyecto)
-        st.table(df[["tipo", "ancho", "alto"]])
-        
-    with col2:
-        st.subheader("Plano de Alzado (Frontal)")
-        imagen_plano = dibujar_plano(st.session_state.proyecto)
-        st.image(imagen_plano, use_container_width=True, caption="Medidas en pulgadas")
+    with tab_planos:
+        muros = sorted(list(set(m['muro'] for m in st.session_state.proyecto)))
+        for m_nombre in muros:
+            st.subheader(f"📍 {m_nombre}")
+            modulos_muro = [m for m in st.session_state.proyecto if m['muro'] == m_nombre]
+            img = Image.new('RGB', (int(sum(m['ancho'] for m in modulos_muro) * 8 + 100), 400), (255, 255, 255))
+            draw = ImageDraw.Draw(img)
+            x_off = 50
+            for mod in modulos_muro:
+                w, h = int(mod['ancho'] * 8), int(mod['alto'] * 8)
+                draw.rectangle([x_off, 350-h, x_off+w, 350], outline="black", width=2, fill="#F1F1F1")
+                draw.text((x_off+5, 350-h+5), f"{mod['ancho']}\"", fill="blue")
+                x_off += w + 10
+            st.image(img)
+
+    with tab_despiece:
+        total_piezas_proyecto = []
+        for i, m in enumerate(st.session_state.proyecto):
+            piezas = calcular_despiece(m)
+            total_piezas_proyecto.extend(piezas)
+            with st.expander(f"Módulo {i+1}: {m['tipo']}"):
+                st.table(pd.DataFrame(piezas))
+
+    with tab_nesting:
+        st.subheader("Optimización de Corte en Hojas de 4x8 ft")
+        hojas_finales = optimizar_nesting(total_piezas_proyecto)
+        st.info(f"Se requieren **{len(hojas_finales)}** hojas de material.")
+
+        for i, hoja in enumerate(hojas_finales):
+            st.write(f"**Hoja #{i+1}**")
+            # Dibujar mapa de corte
+            img_h = Image.new('RGB', (ANCHO_HOJA * ESCALA_NESTING, ALTO_HOJA * ESCALA_NESTING), (240, 240, 240))
+            draw_h = ImageDraw.Draw(img_h)
+            for p in hoja['piezas']:
+                coords = [p['x']*ESCALA_NESTING, p['y']*ESCALA_NESTING, (p['x']+p['w'])*ESCALA_NESTING, (p['y']+p['h'])*ESCALA_NESTING]
+                draw_h.rectangle(coords, outline="black", fill="#D2B48C", width=2)
+                draw_h.text((p['x']*ESCALA_NESTING+5, p['y']*ESCALA_NESTING+5), f"{p['w']}x{p['h']}", fill="black")
+            st.image(img_h, use_container_width=True)
+
 else:
-    st.info("Agrega módulos para empezar a armar tu plano técnico.")
+    st.info("👈 Agrega muebles para generar los planos y el nesting automáticamente.")
+                
