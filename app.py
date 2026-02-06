@@ -1,19 +1,30 @@
-        if btn_add:
-            # Cálculo de costo simple: (Área frontal/Área hoja) * costo + herrajes + mano obra
-            area_hoja = 48 * 96
-            area_frontal = ancho * alto
-            costo_material = (area_frontal / area_hoja) * costo_hoja
-            costo_total = costo_material + costo_herraje + (ancho * mano_obra_pulg)
-            
-            st.session_state.modulos.append({
-                "nombre": nombre if nombre else f"Módulo {len(st.session_state.modulos)+1}",
-                "ancho": ancho,
-                "alto": alto,
-                "costo": round(costo_total, 2)
-            })
-            st.success("¡Módulo agregado!")
+import streamlit as st
+import pandas as pd
+from PIL import Image, ImageDraw
+from fpdf import FPDF
+import tempfile
+
+# Nota: Asegúrate de tener definidas las variables: 
+# ancho, alto, costo_hoja, costo_herraje, mano_obra_pulg, nombre
+
+if btn_add:
+    # 1. Cálculo de costo simple
+    area_hoja = 48 * 96
+    area_frontal = ancho * alto
+    costo_material = (area_frontal / area_hoja) * costo_hoja
+    costo_total = costo_material + costo_herraje + (ancho * mano_obra_pulg)
+    
+    # 2. Guardar en la lista de módulos
+    st.session_state.modulos.append({
+        "nombre": nombre if nombre else f"Módulo {len(st.session_state.modulos)+1}",
+        "ancho": ancho,
+        "alto": alto,
+        "costo": round(costo_total, 2)
+    })
+    st.success("¡Módulo agregado!")
 
 # --- 3. VISUALIZACIÓN Y CÁLCULOS ---
+# (Asegúrate de que 'col2' esté definido antes con col1, col2 = st.columns(2))
 with col2:
     st.header("Vista Previa y Resumen")
     if st.session_state.modulos:
@@ -38,6 +49,9 @@ with col2:
 
 # --- 4. EXPORTACIÓN A PDF ---
 if st.session_state.modulos:
+    # Calculamos el total nuevamente para el PDF
+    total_proyecto = sum(m["costo"] for m in st.session_state.modulos)
+    
     if st.button("📄 Generar Presupuesto PDF"):
         pdf = FPDF()
         pdf.add_page()
@@ -62,4 +76,4 @@ if st.session_state.modulos:
 if st.sidebar.button("🗑️ Borrar Todo"):
     st.session_state.modulos = []
     st.rerun()
-    
+        
