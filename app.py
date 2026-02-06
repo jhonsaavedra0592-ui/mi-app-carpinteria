@@ -76,4 +76,3 @@ if st.session_state.modulos:
 if st.sidebar.button("🗑️ Borrar Todo"):
     st.session_state.modulos = []
     st.rerun()
-        
