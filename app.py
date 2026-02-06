@@ -1,38 +1,65 @@
-import streamlit as st
-from PIL import Image, ImageDraw
-import pandas as pd
-from fpdf import FPDF
-import tempfile
-
-# Configuración de la página
-st.set_page_config(page_title="Carpintería Pro", layout="wide")
-
-st.title("🛠️ Sistema Universal de Carpintería")
-st.write("Diseña módulos, calcula costos y genera tu presupuesto en PDF.")
-
-# --- 1. CONFIGURACIÓN DE PRECIOS (Barra Lateral) ---
-st.sidebar.header("Configuración de Negocio")
-costo_hoja = st.sidebar.number_input("Precio Hoja Plywood (4x8)", value=55.0)
-costo_herraje = st.sidebar.number_input("Herrajes por Módulo ($)", value=25.0)
-mano_obra_pulg = st.sidebar.number_input("Mano de Obra (por pulgada de ancho)", value=12.0)
-profundidad_std = st.sidebar.number_input("Profundidad (pulgadas)", value=23.25)
-
-# --- 2. GESTIÓN DE MÓDULOS ---
-if "modulos" not in st.session_state:
-    st.session_state.modulos = []
-
-col1, col2 = st.columns([1, 2])
-
-with col1:
-    st.header("Añadir Módulo")
-    with st.form("form_modulo"):
-        nombre = st.text_input("Nombre del mueble", placeholder="Ej: Fregadero, Alacena...")
-        ancho = st.number_input("Ancho (pulgadas)", min_value=1.0, value=24.0)
-        alto = st.number_input("Alto (pulgadas)", min_value=1.0, value=34.5)
-        btn_add = st.form_submit_button("➕ Agregar al diseño")
-        
         if btn_add:
+            # Cálculo de costo simple: (Área frontal/Área hoja) * costo + herrajes + mano obra
+            area_hoja = 48 * 96
+            area_frontal = ancho * alto
+            costo_material = (area_frontal / area_hoja) * costo_hoja
+            costo_total = costo_material + costo_herraje + (ancho * mano_obra_pulg)
+            
             st.session_state.modulos.append({
-                "nombre": nombre if nombre else "Módulo",
+                "nombre": nombre if nombre else f"Módulo {len(st.session_state.modulos)+1}",
                 "ancho": ancho,
-                "alto"
+                "alto": alto,
+                "costo": round(costo_total, 2)
+            })
+            st.success("¡Módulo agregado!")
+
+# --- 3. VISUALIZACIÓN Y CÁLCULOS ---
+with col2:
+    st.header("Vista Previa y Resumen")
+    if st.session_state.modulos:
+        df = pd.DataFrame(st.session_state.modulos)
+        st.table(df)
+        
+        total_proyecto = df["costo"].sum()
+        st.metric("Inversión Total Estimada", f"${total_proyecto:,.2f}")
+
+        # Dibujo simple del frente del mueble
+        img = Image.new('RGB', (800, 300), (255, 255, 255))
+        draw = ImageDraw.Draw(img)
+        x_offset = 20
+        for m in st.session_state.modulos:
+            # Escalar dimensiones para visualización
+            w, h = m["ancho"] * 3, m["alto"] * 3
+            draw.rectangle([x_offset, 250-h, x_offset+w, 250], outline="black", width=3, fill="#D2B48C")
+            draw.text((x_offset + 5, 255), m["nombre"], fill="black")
+            x_offset += w + 10
+        
+        st.image(img, caption="Esquema frontal del proyecto")
+
+# --- 4. EXPORTACIÓN A PDF ---
+if st.session_state.modulos:
+    if st.button("📄 Generar Presupuesto PDF"):
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", 'B', 16)
+        pdf.cell(200, 10, "Presupuesto de Carpintería Pro", ln=True, align='C')
+        
+        pdf.set_font("Arial", '', 12)
+        pdf.ln(10)
+        for m in st.session_state.modulos:
+            pdf.cell(0, 10, f"{m['nombre']}: {m['ancho']}\"x{m['alto']}\" - ${m['costo']}", ln=True)
+        
+        pdf.ln(10)
+        pdf.set_font("Arial", 'B', 14)
+        pdf.cell(0, 10, f"TOTAL: ${total_proyecto:,.2f}", ln=True)
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            pdf.output(tmp.name)
+            with open(tmp.name, "rb") as f:
+                st.download_button("⬇️ Descargar PDF", f, file_name="presupuesto.pdf")
+
+# Botón para limpiar proyecto
+if st.sidebar.button("🗑️ Borrar Todo"):
+    st.session_state.modulos = []
+    st.rerun()
+    
