@@ -35,4 +35,4 @@ with col1:
             st.session_state.modulos.append({
                 "nombre": nombre if nombre else "Módulo",
                 "ancho": ancho,
-                "alto
+                "alto"
